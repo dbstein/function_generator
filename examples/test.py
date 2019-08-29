@@ -43,7 +43,7 @@ def random_in(n, a, b):
 xtest = random_in(n-10000, test_range[0], test_range[1])
 xtest = np.concatenate([np.linspace(test_range[0], test_range[1], 10000), xtest])
 
-print('\nTesting function generator')
+print('\nTesting function generator on', n, 'points')
 print('    minimum test value is: {:0.2e}'.format(xtest.min()))
 print('    maximum test value is: {:0.2e}'.format(xtest.max()))
 print('')
