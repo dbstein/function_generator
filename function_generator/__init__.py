@@ -1,1 +1,2 @@
 from .function_generator import FunctionGenerator
+from .function_generator import standard_error_model, relative_error_model

@@ -76,19 +76,26 @@ def _numba_eval(x, lbs, ubs, cs):
     _x = 2*(x-a)/(b-a) - 1.0
     return _numba_chbevl(_x, cs[ind])
 
+def standard_error_model(coefs):
+    return np.abs(coefs[-2:]).max()/max(1, np.abs(coefs[0]))
+
+def relative_error_model(coefs):
+    return np.abs(coefs[-2:]).max()/np.abs(coefs[0])
+
 class FunctionGenerator(object):
     """
     This class provides a simple way to construct a fast "function evaluator"
     For 1-D functions defined on an interval
     """
-    def __init__(self, f, a, b, tol=1e-10, n=12, mw=1e-15, verbose=False):
+    def __init__(self, f, a, b, tol=1e-10, n=12, mw=1e-15, error_model=standard_error_model, verbose=False):
         """
-        f:       function to create evaluator for
-        a:       lower bound of evaluation interval
-        b:       upper bound of evaluation interval
-        tol:     accuracy to recreate function to
-        n:       degree of chebyshev polynomials to be used
-        mw:      minimum width of interval (accuracy no longer guaranteed!)
+        f:            function to create evaluator for
+        a:            lower bound of evaluation interval
+        b:            upper bound of evaluation interval
+        tol:          accuracy to recreate function to
+        n:            degree of chebyshev polynomials to be used
+        mw:           minimum width of interval (accuracy no longer guaranteed!)
+        error_model: function of chebyshev coefs that gives how much error there is
         verbose: generate verbose output
         """
         self.f = f
@@ -101,6 +108,7 @@ class FunctionGenerator(object):
         self.tol = tol
         self.n = n
         self.mw = mw
+        self.error_model = error_model
         self.verbose = verbose
         self.lbs = []
         self.ubs = []
@@ -134,8 +142,7 @@ class FunctionGenerator(object):
             print('[', a, ',', b, ']')
         _, x = get_chebyshev_nodes(a, b, self.n)
         coefs = lu_solve(self.VLU, self.f(x))
-        # modify this to get robust relative errors?
-        tail_energy = np.abs(coefs[-2:]).max()/max(1, np.abs(coefs[0]))
+        tail_energy = self.error_model(coefs)
         if tail_energy < self.tol or b-a < self.mw:
             self.lbs.append(a)
             self.ubs.append(b)
