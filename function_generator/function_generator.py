@@ -33,6 +33,18 @@ def bisect_search(x, ordered_array):
     return n1
 
 @numba.njit(fastmath=True)
+def bisect_search_lookup(x, ordered_array, bounds_table, table_len):
+    table_index = int(x / table_len * bounds_table.shape[0])
+    n1, n2 = bounds_table[table_index]
+    while n2 - n1 > 1:
+        m = n1 + (n2 - n1) // 2
+        if x < ordered_array[m]:
+            n2 = m
+        else:
+            n1 = m
+    return n1
+
+@numba.njit(fastmath=True)
 def _numba_chbevl(x, c):
     x2 = 2*x
     c0 = c[-2]
@@ -44,17 +56,17 @@ def _numba_chbevl(x, c):
     return c0 + c1*x
 
 @numba.njit(parallel=True, fastmath=True)
-def _numba_multieval_check(xs, lbs, ubs, cs, out):
+def _numba_multieval_check(xs, lbs, ubs, bounds_table, cs, out):
     n = xs.size
     for i in numba.prange(n):
-        out[i] = _numba_eval_check(xs[i], lbs, ubs, cs)
+        out[i] = _numba_eval_check(xs[i], lbs, ubs, bounds_table, cs)
 
 @numba.njit(parallel=True, fastmath=True)
-def _numba_multieval(xs, lbs, ubs, cs, out):
+def _numba_multieval(xs, lbs, ubs, bounds_table, cs, out):
     n = xs.size
     for i in numba.prange(n):
         x = xs[i]
-        ind = bisect_search(x, lbs)
+        ind = bisect_search_lookup(x, lbs, bounds_table, ubs[-1] - lbs[0])
         a = lbs[ind]
         b = ubs[ind]
         _x = 2*(x-a)/(b-a) - 1.0
@@ -62,15 +74,15 @@ def _numba_multieval(xs, lbs, ubs, cs, out):
         out[i] = _numba_chbevl(_x, c)
 
 @numba.njit(fastmath=True)
-def _numba_eval_check(x, lbs, ubs, cs):
+def _numba_eval_check(x, lbs, ubs, bounds_table, cs):
     if x >= lbs[0] and x <= ubs[-1]:
-        return _numba_eval(x, lbs, ubs, cs)
+        return _numba_eval(x, lbs, ubs, bounds_table, cs)
     else:
         return np.nan
 
 @numba.njit(fastmath=True)
-def _numba_eval(x, lbs, ubs, cs):
-    ind = bisect_search(x, lbs)
+def _numba_eval(x, lbs, ubs, bounds_table, cs):
+    ind = bisect_search_lookup(x, lbs, bounds_table, ubs[-1] - lbs[0])
     a = lbs[ind]
     b = ubs[ind]
     _x = 2*(x-a)/(b-a) - 1.0
@@ -120,6 +132,14 @@ class FunctionGenerator(object):
         self.lbs = np.array(self.lbs)
         self.ubs = np.array(self.ubs)
         self.coef_mat = np.row_stack(self.coefs)
+
+        self.bounds_table = np.zeros([2048, 2], dtype=np.int)
+        for i in range(0, self.bounds_table.shape[0]):
+            x0 = self.a + i * (self.b - self.a) / self.bounds_table.shape[0]
+            x1 = self.a + (i+1) * (self.b - self.a) / self.bounds_table.shape[0]
+            self.bounds_table[i][0] = int(bisect_search(x0, self.lbs))
+            self.bounds_table[i][1] = int(bisect_search(x1, self.lbs) + 1)
+
     def __call__(self, x, check_bounds=True, out=None):
         """
         Evaluate function at input x
@@ -127,15 +147,15 @@ class FunctionGenerator(object):
         if isinstance(x, np.ndarray):
             if out is None: out = np.empty(x.shape, dtype=self.dtype)
             if check_bounds:
-                _numba_multieval_check(x.ravel(), self.lbs, self.ubs, self.coef_mat, out.ravel())
+                _numba_multieval_check(x.ravel(), self.lbs, self.ubs, self.bounds_table, self.coef_mat, out.ravel())
             else:
-                _numba_multieval(x.ravel(), self.lbs, self.ubs, self.coef_mat, out.ravel())
+                _numba_multieval(x.ravel(), self.lbs, self.ubs, self.bounds_table, self.coef_mat, out.ravel())
             return out
         else:
             if check_bounds:
-                return _numba_eval_check(x, self.lbs, self.ubs, self.coef_mat)
+                return _numba_eval_check(x, self.lbs, self.ubs, self.bounds_table, self.coef_mat)
             else:
-                return _numba_eval(x, self.lbs, self.ubs, self.coef_mat)
+                return _numba_eval(x, self.lbs, self.ubs, self.bounds_table, self.coef_mat)
     def _fit(self, a, b):
         m = (a+b)/2.0
         if self.verbose:
@@ -154,15 +174,16 @@ class FunctionGenerator(object):
     def get_base_function(self, check=True):
         lbs = self.lbs
         ubs = self.ubs
+        bounds_table = self.bounds_table
         cs = self.coef_mat
         if check:
             @numba.njit(fastmath=True)
             def func(x):
-                return _numba_eval_check(x, lbs, ubs, cs)
+                return _numba_eval_check(x, lbs, ubs, bounds_table, cs)
         else:
             @numba.njit(fastmath=True)
             def func(x):
-                return _numba_eval(x, lbs, ubs, cs)
+                return _numba_eval(x, lbs, ubs, bounds_table, cs)
         return func
 
     def get_base_function2(self, check=True):
@@ -174,8 +195,4 @@ class FunctionGenerator(object):
         else:
             return _numba_eval
         return func
-
-
-
-
 
