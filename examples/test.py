@@ -1,14 +1,26 @@
+import os
+import sys
+import psutil
+
+if len(sys.argv) > 1:
+    scores = sys.argv[1]
+    os.environ['MKL_NUM_THREADS'] = scores
+    os.environ['OMP_NUM_THREADS'] = scores
+    os.environ['NUMBA_NUM_THREADS'] = scores
+    cpu_count = int(scores)
+    thread_count = int(scores)
+else:
+    cpu_count = psutil.cpu_count(logical=False)
+    thread_count = psutil.cpu_count(logical=True)
+
 import numpy as np
 from function_generator import FunctionGenerator as FG
 from function_generator import standard_error_model, relative_error_model
 import time
 from scipy.special import k0, struve, y0, hankel1
 import numba
-import os
 
-cpu_count = int(os.cpu_count()/2)
-
-n = 1000*1000
+n = 1000*1000*10
 approx_range = [1e-10, 1000]
 test_range = [1e-10, 999]
 tol = 1e-12
@@ -16,18 +28,20 @@ order = 8
 
 # functions to test evaluation of
 true_funcs = [
-    lambda x: k0(x),
+    lambda x: k0(0.1*x),
     lambda x: y0(x),
     lambda x: hankel1(0, x),
     lambda x: np.log(x),
     lambda x: 1/x**8,
+    lambda x: np.sin(1/x),
 ]
 true_func_disp = [
-    'k0(x); using standard error model, relative error not guaranteed',
+    'k0(x/10); using standard error model, relative error not guaranteed',
     'y0(x); using standard error model, relative error not guaranteed',
     'hankel1(0, x); Using standard error model, relative error not guaranteed',
     'np.log(x); Using standard error model, relative error not guaranteed',
     '1/x**8; Using relative error model, relative error should be good',
+    'sin(1/x); should fail',
 ]
 error_models = [
     standard_error_model,
@@ -35,6 +49,7 @@ error_models = [
     standard_error_model,
     standard_error_model,
     relative_error_model,
+    standard_error_model,
 ]
 
 def random_in(n, a, b):
@@ -46,7 +61,7 @@ def random_in(n, a, b):
 xtest = random_in(n-10000, test_range[0], test_range[1])
 xtest = np.concatenate([np.linspace(test_range[0], test_range[1], 10000), xtest])
 
-print('\nTesting function generator on', n, 'points')
+print('\nTesting function generator on', n, 'points, using', cpu_count, 'cores,', thread_count, 'threads.')
 print('    minimum test value is: {:0.2e}'.format(xtest.min()))
 print('    maximum test value is: {:0.2e}'.format(xtest.max()))
 print('')

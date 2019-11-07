@@ -104,7 +104,7 @@ class FunctionGenerator(object):
     This class provides a simple way to construct a fast "function evaluator"
     For 1-D functions defined on an interval
     """
-    def __init__(self, f, a, b, tol=1e-10, n=12, mw=1e-15, error_model=standard_error_model, verbose=False):
+    def __init__(self, f, a, b, tol=1e-10, n=12, mw=1e-15, error_model=standard_error_model, mi=100000, verbose=False):
         """
         f:            function to create evaluator for
         a:            lower bound of evaluation interval
@@ -113,6 +113,7 @@ class FunctionGenerator(object):
         n:            degree of chebyshev polynomials to be used
         mw:           minimum width of interval (accuracy no longer guaranteed!)
         error_model: function of chebyshev coefs that gives how much error there is
+        mi:          maximum number of intervals
         verbose: generate verbose output
         """
         self.f = f
@@ -125,6 +126,7 @@ class FunctionGenerator(object):
         self.tol = tol
         self.n = n
         self.mw = mw
+        self.mi = mi
         self.error_model = error_model
         self.verbose = verbose
         self.lbs = []
@@ -133,6 +135,9 @@ class FunctionGenerator(object):
         _x, _ = get_chebyshev_nodes(-1, 1, self.n)
         self.V = np.polynomial.chebyshev.chebvander(_x, self.n-1)
         self.VLU = lu_factor(self.V)
+
+        self.count = 0
+
         self._fit(self.a, self.b)
         self.lbs = np.array(self.lbs)
         self.ubs = np.array(self.ubs)
@@ -197,6 +202,9 @@ class FunctionGenerator(object):
             else:
                 return self._core(x)
     def _fit(self, a, b):
+        self.count += 1
+        if self.count > self.mi:
+            raise Exception("Maximum number of intervals exceeded, try another function, increase 'mi', or increase 'n'.")
         m = (a+b)/2.0
         if self.verbose:
             print('[', a, ',', b, ']')
