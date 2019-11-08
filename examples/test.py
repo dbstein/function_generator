@@ -46,7 +46,7 @@ true_func_disp = [
     'np.log(x); Using standard error model, relative error not guaranteed',
     '1/x**8; Using relative error model, relative error should be good',
     '1/sqrt(x) Using relative error model, relative error should be good',
-    'x*x; refinement test does not work; only gives one interval???',
+    'x*x; refinement test does not work; only gives one interval!',
     'sin(1/x); should fail',
 ]
 error_models = [
