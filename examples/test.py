@@ -29,25 +29,34 @@ order = 8
 # functions to test evaluation of
 true_funcs = [
     lambda x: k0(0.1*x),
+    lambda x: k0(0.1*x),
     lambda x: y0(x),
     lambda x: hankel1(0, x),
     lambda x: np.log(x),
     lambda x: 1/x**8,
+    lambda x: 1/np.sqrt(x),
+    lambda x: x*x,
     lambda x: np.sin(1/x),
 ]
 true_func_disp = [
-    'k0(x/10); using standard error model, relative error not guaranteed',
-    'y0(x); using standard error model, relative error not guaranteed',
+    'k0(x/10); Using relative error model, relative error should be good',
+    'k0(x/10); Using standard error model, relative error not guaranteed',
+    'y0(x); Using standard error model, relative error not guaranteed',
     'hankel1(0, x); Using standard error model, relative error not guaranteed',
     'np.log(x); Using standard error model, relative error not guaranteed',
     '1/x**8; Using relative error model, relative error should be good',
+    '1/sqrt(x) Using relative error model, relative error should be good',
+    'x*x; refinement test does not work; only gives one interval???',
     'sin(1/x); should fail',
 ]
 error_models = [
+    relative_error_model,
     standard_error_model,
     standard_error_model,
     standard_error_model,
     standard_error_model,
+    relative_error_model,
+    relative_error_model,
     relative_error_model,
     standard_error_model,
 ]
