@@ -112,7 +112,7 @@ class FunctionGenerator(object):
     This class provides a simple way to construct a fast "function evaluator"
     For 1-D functions defined on an interval
     """
-    def __init__(self, f, a, b, tol=1e-10, n=12, mw=1e-15, error_model=standard_error_model, mi=100000, verbose=False):
+    def __init__(self, f, a, b, tol=1e-10, n=8, mw=1e-15, error_model=standard_error_model, mi=100000, verbose=False):
         """
         f:            function to create evaluator for
         a:            lower bound of evaluation interval
