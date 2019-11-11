@@ -41,7 +41,7 @@ def _bisect_search(x, ordered_array):
 bisect_search = jit_it(_bisect_search)
 
 def _bisect_search_lookup(x, ordered_array, bounds_table, idiv):
-    table_index = int(x * idiv)
+    table_index = int((x-ordered_array[0]) * idiv)
     n1, n2 = bounds_table[table_index]
     while n2 - n1 > 1:
         m = n1 + (n2 - n1) // 2
@@ -153,12 +153,17 @@ class FunctionGenerator(object):
 
         depth = 2**11
         self.bounds_table = np.zeros([depth, 2], dtype=np.int)
-        for i in range(0, self.bounds_table.shape[0]):
-            x0 = self.a + i * (self.b - self.a) / self.bounds_table.shape[0]
-            x1 = self.a + (i+1) * (self.b - self.a) / self.bounds_table.shape[0]
-            self.bounds_table[i][0] = int(bisect_search(x0, self.lbs))
-            self.bounds_table[i][1] = int(bisect_search(x1, self.lbs) + 1)
-        self.div = (self.b - self.a)/depth
+        x0, xh = np.linspace(self.a, self.b, depth+1, retstep=True)
+        self.bounds_table[0][0] = 0
+        ll = len(self.lbs)
+        for i in range(1,depth):
+            ii = int(bisect_search(x0[i], self.lbs))
+            self.bounds_table[i]  [0] = ii
+            self.bounds_table[i-1][1] = ii+1
+        self.bounds_table[-1][1] = int(bisect_search(x0[i], self.lbs)) + 1
+        self.div = xh
+        # need to add this so that we don't throw a segfault at the very right endpoint!
+        self.bounds_table = np.row_stack([ self.bounds_table, (ll-1, ll) ])
 
         # package things up for numba
         lbs = self.lbs
