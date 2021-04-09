@@ -3,6 +3,7 @@ import numba
 from scipy.linalg import lu_factor, lu_solve
 from collections import OrderedDict
 from . import new_enough
+from .error_models import standard_error_model
 
 # to deal with different numba versions
 def jit_it(func, **kwargs):
@@ -100,12 +101,6 @@ def _numba_eval8(x, lbs, ubs, bounds_table, cs, idiv):
     _x = 2*(x-a)/(b-a) - 1.0
     return numba_chbevl8(_x, cs[ind])
 numba_eval8 = jit_it(_numba_eval8)
-
-def standard_error_model(coefs):
-    return np.abs(coefs[-2:]).max()/max(1, np.abs(coefs[0]))
-
-def relative_error_model(coefs):
-    return np.abs(coefs[-2:]).max()/np.abs(coefs[0])
 
 class FunctionGenerator(object):
     """
@@ -225,8 +220,10 @@ class FunctionGenerator(object):
         if self.verbose:
             print('[', a, ',', b, ']')
         _, x = get_chebyshev_nodes(a, b, self.n)
-        coefs = lu_solve(self.VLU, self.f(x))
-        tail_energy = self.error_model(coefs)
+        f = self.f(x)
+        coefs = lu_solve(self.VLU, f)
+        f = np.concatenate([(self.f(a), self.f(b)), f])
+        tail_energy = self.error_model(coefs, f)
         if tail_energy < self.tol or b-a < self.mw:
             self.lbs.append(a)
             self.ubs.append(b)

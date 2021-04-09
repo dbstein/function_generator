@@ -15,7 +15,7 @@ else:
 
 import numpy as np
 from function_generator import FunctionGenerator as FG
-from function_generator import standard_error_model, relative_error_model
+from function_generator import standard_error_model, relative_error_model, new_error_model
 import time
 from scipy.special import k0, struve, y0, hankel1
 import numba
@@ -23,7 +23,7 @@ import numba
 n = 1000*1000*10
 approx_range = [1e-10, 1000]
 test_range = [1e-10, 999]
-tol = 1e-12
+tol = 1e-14
 order = 8
 
 # functions to test evaluation of
@@ -57,7 +57,7 @@ error_models = [
     standard_error_model,
     relative_error_model,
     relative_error_model,
-    relative_error_model,
+    new_error_model,
     standard_error_model,
 ]
 
