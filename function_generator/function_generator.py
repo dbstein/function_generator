@@ -102,11 +102,10 @@ def _numba_eval8(x, lbs, ubs, bounds_table, cs, idiv):
     return numba_chbevl8(_x, cs[ind])
 numba_eval8 = jit_it(_numba_eval8)
 
-
 def _calc_local_int(x, lb, ub, coefs):
     _x = 2*(x-lb)/(ub-lb) - 1.0
     Tnm2, Tnm1 = 1, _x
-    tot = (1 - _x) * coefs[0] + (0.5 - 0.5 * _x * _x) * coefs[1]
+    tot = (1 - _x) * coefs[0] + 0.5 * (1.0 - _x*_x) * coefs[1]
     for i in range(2, coefs.size):
         numer = (2*_x*_x*(i - 1) - i)*Tnm1 - _x*(i - 1)*Tnm2
         tot += -(1 + numer) * coefs[i] / (i*i - 1)
@@ -116,6 +115,15 @@ def _calc_local_int(x, lb, ub, coefs):
 
     return 0.5 * tot * (ub - lb)
 calc_local_int = jit_it(_calc_local_int)
+
+def _numba_integrate(a, b, lbs, ubs, bounds_table, cs, idiv, cdf):
+    seg_a = bisect_search_lookup(a, lbs, bounds_table, idiv)
+    seg_b = bisect_search_lookup(b, lbs, bounds_table, idiv)
+    int_a = calc_local_int(a, lbs[seg_a], ubs[seg_a], cs[seg_a, :])
+    int_b = calc_local_int(b, lbs[seg_b], ubs[seg_b], cs[seg_b, :])
+    return cdf[seg_b] - cdf[seg_a] - int_b + int_a
+numba_integrate = jit_it(_numba_integrate)
+
 
 class FunctionGenerator(object):
     """
@@ -150,7 +158,6 @@ class FunctionGenerator(object):
         self.lbs = []
         self.ubs = []
         self.coefs = []
-        self.cumulative_integral = []
         _x, _ = get_chebyshev_nodes(-1, 1, self.n)
         self.V = np.polynomial.chebyshev.chebvander(_x, self.n-1)
         self.VLU = lu_factor(self.V)
@@ -184,7 +191,7 @@ class FunctionGenerator(object):
             denom = float(i**2 - 1)
             int_vec[i] = -(1+(-1)**i) / denom
 
-        self.cumulative_integral = 0.5 * np.cumsum(np.sum((int_vec * self.coef_mat), axis=1) * (self.ubs - self.lbs))
+        cumulative_integral = 0.5 * np.cumsum(np.sum((int_vec * self.coef_mat), axis=1) * (self.ubs - self.lbs))
 
         # package things up for numba
         lbs = self.lbs
@@ -222,12 +229,43 @@ class FunctionGenerator(object):
         _multi_eval_check = jit_it(_multi_eval_check, parallel=True)
         self._multi_eval_check = _multi_eval_check
 
-    def integrate(self, a, b):
-        seg_a = bisect_search_lookup(a, self.lbs, self.bounds_table, 1.0 / self.div)
-        seg_b = bisect_search_lookup(b, self.lbs, self.bounds_table, 1.0 / self.div)
-        int_a = calc_local_int(a, self.lbs[seg_a], self.ubs[seg_a], self.coef_mat[seg_a, :])
-        int_b = calc_local_int(b, self.lbs[seg_b], self.ubs[seg_b], self.coef_mat[seg_b, :])
-        return self.cumulative_integral[seg_b] - self.cumulative_integral[seg_a] - int_b + int_a
+        def _integrate(a, b):
+            return numba_integrate(a, b, lbs, ubs, bounds_table, coef_mat, idiv, cumulative_integral)
+        _integrate = jit_it(_integrate)
+        self._integrate = _integrate
+
+        def _integrate_check(a, b):
+            ok = a >= lbs[0] and a <= ubs[-1] and b >= lbs[0] and b <= ubs[-1]
+            return _integrate(a, b) if ok else np.nan
+        _integrate_check = jit_it(_integrate_check)
+        self._integrate_check = _integrate_check
+
+        def _multi_eval_integral(a_arr, b_arr, out):
+            for i in numba.prange(a_arr.size):
+                out[i] = _integrate(a_arr[i], b_arr[i])
+        _multi_eval_integral = jit_it(_multi_eval_integral, parallel=True)
+        self._multi_eval_integral = _multi_eval_integral
+
+        def _multi_eval_integral_check(a_arr, b_arr, out):
+            for i in numba.prange(a_arr.size):
+                out[i] = _integrate_check(a_arr[i], b_arr[i])
+        _multi_eval_integral_check = jit_it(_multi_eval_integral_check, parallel=True)
+        self._multi_eval_integral_check = _multi_eval_integral_check
+
+    def integrate(self, a, b, check_bounds=True, out=None):
+        if isinstance(a, np.ndarray):
+            if out is None:
+                out = np.empty(a.shape, dtype=self.dtype)
+            if check_bounds:
+                self._multi_eval_integral_check(a.ravel(), b.ravel(), out.ravel())
+            else:
+                self._multi_eval_integral(a.ravel(), b.ravel(), out.ravel())
+            return out
+        else:
+            if check_bounds:
+                return self._integrate_check(a, b)
+            else:
+                return self._integrate(a, b)
 
     def __call__(self, x, check_bounds=True, out=None):
         """
@@ -245,6 +283,7 @@ class FunctionGenerator(object):
                 return self._core_check(x)
             else:
                 return self._core(x)
+
     def _fit(self, a, b):
         self.count += 1
         if self.count > self.mi:
@@ -267,3 +306,6 @@ class FunctionGenerator(object):
 
     def get_base_function(self, check=True):
         return self._core_check if check else self._core
+
+    def get_base_integral_function(self, check=True):
+        return self._integrate_check if check else self._integrate
