@@ -102,6 +102,21 @@ def _numba_eval8(x, lbs, ubs, bounds_table, cs, idiv):
     return numba_chbevl8(_x, cs[ind])
 numba_eval8 = jit_it(_numba_eval8)
 
+
+def _calc_local_int(x, lb, ub, coefs):
+    _x = 2*(x-lb)/(ub-lb) - 1.0
+    Tnm2, Tnm1 = 1, _x
+    tot = (1 - _x) * coefs[0] + (0.5 - 0.5 * _x * _x) * coefs[1]
+    for i in range(2, coefs.size):
+        numer = (2*_x*_x*(i - 1) - i)*Tnm1 - _x*(i - 1)*Tnm2
+        tot += -(1 + numer) * coefs[i] / (i*i - 1)
+        Tn = 2 * _x * Tnm1 - Tnm2
+        Tnm2 = Tnm1
+        Tnm1 = Tn
+
+    return 0.5 * tot * (ub - lb)
+calc_local_int = jit_it(_calc_local_int)
+
 class FunctionGenerator(object):
     """
     This class provides a simple way to construct a fast "function evaluator"
@@ -163,15 +178,11 @@ class FunctionGenerator(object):
 
         # calculate cumulative integral for each sub-interval
         int_vec = np.empty(shape=self.n)
-        upper_correction = np.empty(shape=self.n)
-        upper_correction[0], upper_correction[1] = 1, 0.5
         int_vec[0] = 2
         int_vec[1] = 0
         for i in range(2, self.n):
             denom = float(i**2 - 1)
             int_vec[i] = -(1+(-1)**i) / denom
-            upper_correction[i] = -1 / denom
-        self.upper_correction = upper_correction
 
         self.cumulative_integral = 0.5 * np.cumsum(np.sum((int_vec * self.coef_mat), axis=1) * (self.ubs - self.lbs))
 
@@ -211,26 +222,11 @@ class FunctionGenerator(object):
         _multi_eval_check = jit_it(_multi_eval_check, parallel=True)
         self._multi_eval_check = _multi_eval_check
 
-    def calc_local_int(self, x, lb, ub, coefs):
-        Tn = np.empty(shape=self.n)
-        int_Tn = np.empty(shape=self.n)
-        _x = 2*(x-lb)/(ub-lb) - 1.0
-
-        Tn[0], Tn[1] = 1, _x
-        int_Tn[0] = (1 - _x) * coefs[0]
-        int_Tn[1] = (0.5 - 0.5 * _x * _x) * coefs[1]
-        for i in range(2, self.n):
-            Tn[i] = 2 * _x * Tn[i-1] - Tn[i-2]
-            denom = i*i - 1
-            numer = (2*_x*_x*(i - 1) - i)*Tn[i-1] - _x*(i - 1)*Tn[i-2]
-            int_Tn[i] = -(1 + numer) * coefs[i] / denom
-        return 0.5 * np.sum(int_Tn) * (ub - lb)
-
     def integrate(self, a, b):
         seg_a = bisect_search_lookup(a, self.lbs, self.bounds_table, 1.0 / self.div)
         seg_b = bisect_search_lookup(b, self.lbs, self.bounds_table, 1.0 / self.div)
-        int_a = self.calc_local_int(a, self.lbs[seg_a], self.ubs[seg_a], self.coef_mat[seg_a, :])
-        int_b = self.calc_local_int(b, self.lbs[seg_b], self.ubs[seg_b], self.coef_mat[seg_b, :])
+        int_a = calc_local_int(a, self.lbs[seg_a], self.ubs[seg_a], self.coef_mat[seg_a, :])
+        int_b = calc_local_int(b, self.lbs[seg_b], self.ubs[seg_b], self.coef_mat[seg_b, :])
         return self.cumulative_integral[seg_b] - self.cumulative_integral[seg_a] - int_b + int_a
 
     def __call__(self, x, check_bounds=True, out=None):
