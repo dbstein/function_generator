@@ -211,30 +211,27 @@ class FunctionGenerator(object):
         _multi_eval_check = jit_it(_multi_eval_check, parallel=True)
         self._multi_eval_check = _multi_eval_check
 
-    def calc_local_int(self, x, segment):
+    def calc_local_int(self, x, lb, ub, coefs):
         Tn = np.empty(shape=self.n)
         int_Tn = np.empty(shape=self.n)
-        a = self.lbs[segment]
-        b = self.ubs[segment]
-        _x = 2*(x-a)/(b-a) - 1.0
+        _x = 2*(x-lb)/(ub-lb) - 1.0
 
         Tn[0], Tn[1] = 1, _x
-        int_Tn[0], int_Tn[1] = _x, 0.5 * _x * _x
+        int_Tn[0] = (1 - _x) * coefs[0]
+        int_Tn[1] = (0.5 - 0.5 * _x * _x) * coefs[1]
         for i in range(2, self.n):
             Tn[i] = 2 * _x * Tn[i-1] - Tn[i-2]
             denom = i*i - 1
             numer = (2*_x*_x*(i - 1) - i)*Tn[i-1] - _x*(i - 1)*Tn[i-2]
-            int_Tn[i] = numer / denom
-        return np.dot(self.coef_mat[segment, :], int_Tn)
+            int_Tn[i] = -(1 + numer) * coefs[i] / denom
+        return 0.5 * np.sum(int_Tn) * (ub - lb)
 
     def integrate(self, a, b):
         seg_a = bisect_search_lookup(a, self.lbs, self.bounds_table, 1.0 / self.div)
         seg_b = bisect_search_lookup(b, self.lbs, self.bounds_table, 1.0 / self.div)
-        int_a = self.calc_local_int(a, seg_a)
-        int_b = self.calc_local_int(b, seg_b)
-        lower_eval = 0.5 * (np.dot(self.upper_correction, self.coef_mat[seg_a, :]) - int_a) * (self.ubs[seg_a] - self.lbs[seg_a])
-        upper_eval = 0.5 * (np.dot(self.upper_correction, self.coef_mat[seg_b, :]) - int_b) * (self.ubs[seg_b] - self.lbs[seg_b])
-        return self.cumulative_integral[seg_b] - self.cumulative_integral[seg_a] - upper_eval + lower_eval
+        int_a = self.calc_local_int(a, self.lbs[seg_a], self.ubs[seg_a], self.coef_mat[seg_a, :])
+        int_b = self.calc_local_int(b, self.lbs[seg_b], self.ubs[seg_b], self.coef_mat[seg_b, :])
+        return self.cumulative_integral[seg_b] - self.cumulative_integral[seg_a] - int_b + int_a
 
     def __call__(self, x, check_bounds=True, out=None):
         """
