@@ -135,6 +135,7 @@ class FunctionGenerator(object):
         self.lbs = []
         self.ubs = []
         self.coefs = []
+        self.cumulative_integral = []
         _x, _ = get_chebyshev_nodes(-1, 1, self.n)
         self.V = np.polynomial.chebyshev.chebvander(_x, self.n-1)
         self.VLU = lu_factor(self.V)
@@ -159,6 +160,20 @@ class FunctionGenerator(object):
         self.div = xh
         # need to add this so that we don't throw a segfault at the very right endpoint!
         self.bounds_table = np.row_stack([ self.bounds_table, (ll-1, ll) ])
+
+        # calculate cumulative integral for each sub-interval
+        int_vec = np.empty(shape=self.n)
+        upper_correction = np.empty(shape=self.n)
+        upper_correction[0], upper_correction[1] = 1, 0.5
+        int_vec[0] = 2
+        int_vec[1] = 0
+        for i in range(2, self.n):
+            denom = float(i**2 - 1)
+            int_vec[i] = -(1+(-1)**i) / denom
+            upper_correction[i] = -1 / denom
+        self.upper_correction = upper_correction
+
+        self.cumulative_integral = 0.5 * np.cumsum(np.sum((int_vec * self.coef_mat), axis=1) * (self.ubs - self.lbs))
 
         # package things up for numba
         lbs = self.lbs
@@ -195,6 +210,31 @@ class FunctionGenerator(object):
                 out[i] = _core_check(xs[i])
         _multi_eval_check = jit_it(_multi_eval_check, parallel=True)
         self._multi_eval_check = _multi_eval_check
+
+    def calc_local_int(self, x, segment):
+        Tn = np.empty(shape=self.n)
+        int_Tn = np.empty(shape=self.n)
+        a = self.lbs[segment]
+        b = self.ubs[segment]
+        _x = 2*(x-a)/(b-a) - 1.0
+
+        Tn[0], Tn[1] = 1, _x
+        int_Tn[0], int_Tn[1] = _x, 0.5 * _x * _x
+        for i in range(2, self.n):
+            Tn[i] = 2 * _x * Tn[i-1] - Tn[i-2]
+            denom = i*i - 1
+            numer = (2*_x*_x*(i - 1) - i)*Tn[i-1] - _x*(i - 1)*Tn[i-2]
+            int_Tn[i] = numer / denom
+        return np.dot(self.coef_mat[segment, :], int_Tn)
+
+    def integrate(self, a, b):
+        seg_a = bisect_search_lookup(a, self.lbs, self.bounds_table, 1.0 / self.div)
+        seg_b = bisect_search_lookup(b, self.lbs, self.bounds_table, 1.0 / self.div)
+        int_a = self.calc_local_int(a, seg_a)
+        int_b = self.calc_local_int(b, seg_b)
+        lower_eval = 0.5 * (np.dot(self.upper_correction, self.coef_mat[seg_a, :]) - int_a) * (self.ubs[seg_a] - self.lbs[seg_a])
+        upper_eval = 0.5 * (np.dot(self.upper_correction, self.coef_mat[seg_b, :]) - int_b) * (self.ubs[seg_b] - self.lbs[seg_b])
+        return self.cumulative_integral[seg_b] - self.cumulative_integral[seg_a] - upper_eval + lower_eval
 
     def __call__(self, x, check_bounds=True, out=None):
         """
