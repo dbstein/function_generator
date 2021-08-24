@@ -124,6 +124,24 @@ def _numba_integrate(a, b, lbs, ubs, bounds_table, cs, idiv, cdf):
     return cdf[seg_b] - cdf[seg_a] - int_b + int_a
 numba_integrate = jit_it(_numba_integrate)
 
+def _numba_differentiate(x, lbs, ubs, bounds_table, cs, idiv):
+    ind = bisect_search_lookup(x, lbs, bounds_table, idiv)
+    coefs = cs[ind, :]
+    a = lbs[ind]
+    b = ubs[ind]
+
+    _x = 2*(x-a)/(b-a) - 1.0
+    Unm2, Unm1 = 1, 2 * _x
+    tot = coefs[1]
+    for i in range(2, coefs.size):
+        tot += i * Unm1 * coefs[i]
+        Un = 2 * _x * Unm1 - Unm2
+        Unm2 = Unm1
+        Unm1 = Un
+
+    return 2.0 * tot / (b - a)
+numba_differentiate = jit_it(_numba_differentiate)
+
 
 class FunctionGenerator(object):
     """
@@ -252,6 +270,30 @@ class FunctionGenerator(object):
         _multi_eval_integral_check = jit_it(_multi_eval_integral_check, parallel=True)
         self._multi_eval_integral_check = _multi_eval_integral_check
 
+        def _differentiate(x):
+            return numba_differentiate(x, lbs, ubs, bounds_table, coef_mat, idiv)
+        _differentiate = jit_it(_differentiate)
+        self._differentiate = _differentiate
+
+        def _differentiate_check(x):
+            ok = x >= lbs[0] and x <= ubs[-1]
+            return _differentiate(x) if ok else np.nan
+        _differentiate_check = jit_it(_differentiate_check)
+        self._differentiate_check = _differentiate_check
+
+        def _multi_eval_derivative(xs, out):
+            for i in numba.prange(xs.size):
+                out[i] = _differentiate(xs[i], xs[i])
+        _multi_eval_derivative = jit_it(_multi_eval_derivative, parallel=True)
+        self._multi_eval_derivative = _multi_eval_derivative
+
+        def _multi_eval_derivative_check(xs, out):
+            for i in numba.prange(xs.size):
+                out[i] = _differentiate_check(xs[i])
+        _multi_eval_derivative_check = jit_it(_multi_eval_derivative_check, parallel=True)
+        self._multi_eval_derivative_check = _multi_eval_derivative_check
+
+
     def integrate(self, a, b, check_bounds=True, out=None):
         if isinstance(a, np.ndarray):
             if out is None:
@@ -266,6 +308,21 @@ class FunctionGenerator(object):
                 return self._integrate_check(a, b)
             else:
                 return self._integrate(a, b)
+
+    def differentiate(self, x, check_bounds=True, out=None):
+        if isinstance(x, np.ndarray):
+            if out is None:
+                out = np.empty(x.shape, dtype=self.dtype)
+            if check_bounds:
+                self._multi_eval_derivative_check(x.ravel(), out.ravel())
+            else:
+                self._multi_eval_derivative(x.ravel(), out.ravel())
+            return out
+        else:
+            if check_bounds:
+                return self._differentiate_check(x)
+            else:
+                return self._differentiate(x)
 
     def __call__(self, x, check_bounds=True, out=None):
         """
