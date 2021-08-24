@@ -283,7 +283,7 @@ class FunctionGenerator(object):
 
         def _multi_eval_derivative(xs, out):
             for i in numba.prange(xs.size):
-                out[i] = _differentiate(xs[i], xs[i])
+                out[i] = _differentiate(xs[i])
         _multi_eval_derivative = jit_it(_multi_eval_derivative, parallel=True)
         self._multi_eval_derivative = _multi_eval_derivative
 
@@ -366,3 +366,6 @@ class FunctionGenerator(object):
 
     def get_base_integral_function(self, check=True):
         return self._integrate_check if check else self._integrate
+
+    def get_base_derivative_function(self, check=True):
+        return self._differentiate_check if check else self._differentiate
