@@ -8,8 +8,10 @@ from .error_models import standard_error_model
 # to deal with different numba versions
 def jit_it(func, **kwargs):
     kwargs['fastmath'] = True
-    if new_enough:
+    if new_enough and 'inline' not in kwargs:
         kwargs['inline'] = 'always'
+    if not new_enough and 'inline' in kwargs:
+        kwargs.pop('inline')
     return numba.njit(func, **kwargs)
 
 ################################################################################
@@ -107,7 +109,7 @@ class FunctionGenerator(object):
     This class provides a simple way to construct a fast "function evaluator"
     For 1-D functions defined on an interval
     """
-    def __init__(self, f, a, b, tol=1e-10, n=8, mw=1e-15, error_model=standard_error_model, mi=100000, verbose=False):
+    def __init__(self, f, a, b, tol=1e-10, n=8, mw=1e-15, error_model=standard_error_model, mi=100000, verbose=False, inline_core=True):
         """
         f:            function to create evaluator for
         a:            lower bound of evaluation interval
@@ -147,7 +149,7 @@ class FunctionGenerator(object):
         self.coef_mat = np.row_stack(self.coefs)
 
         depth = 2**11
-        self.bounds_table = np.zeros([depth, 2], dtype=np.int)
+        self.bounds_table = np.zeros([depth, 2], dtype=int)
         x0, xh = np.linspace(self.a, self.b, depth+1, retstep=True)
         self.bounds_table[0][0] = 0
         ll = len(self.lbs)
@@ -167,21 +169,23 @@ class FunctionGenerator(object):
         coef_mat = self.coef_mat
         idiv = 1.0/self.div
 
+        inline = 'always' if inline_core else 'never'
+
         if self.n == 8:
             def _core(x):
                 return numba_eval8(x, lbs, ubs, bounds_table, coef_mat, idiv)
-            _core = jit_it(_core)
+            _core = jit_it(_core, inline=inline)
             self._core = _core
         else:
             def _core(x):
                 return numba_eval(x, lbs, ubs, bounds_table, coef_mat, idiv)
-            _core = jit_it(_core)
+            _core = jit_it(_core, inline=inline)
             self._core = _core
 
         def _core_check(x):
             ok = x >= lbs[0] and x <= ubs[-1]
-            return _core(x) if ok else np.nan
-        _core_check = jit_it(_core_check)
+            return _core(x) if ok else 0.0
+        _core_check = jit_it(_core_check, inline=inline)
         self._core_check = _core_check
 
         def _multi_eval(xs, out):

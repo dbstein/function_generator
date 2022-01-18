@@ -20,7 +20,7 @@ import time
 from scipy.special import k0, struve, y0, hankel1
 import numba
 
-n = 1000*1000*10
+n = 1000*1000*1
 approx_range = [1e-10, 1000]
 test_range = [1e-10, 999]
 tol = 1e-14
